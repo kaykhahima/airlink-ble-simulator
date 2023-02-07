@@ -51,6 +51,7 @@ import java.util.UUID;
 
 public class MainActivity extends AppCompatActivity {
 
+    private static final String DEVICE_NAME = "AIRLINK";
     private static final UUID PC_CHARACTERISTIC_UUID = UUID.fromString("d40a2489-f277-4600-b583-dd255530a759");
     private static final UUID CLIENT_CHARACTERISTIC_CONFIGURATION_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
     private static final String TAG = MainActivity.class.getCanonicalName();
@@ -60,8 +61,12 @@ public class MainActivity extends AppCompatActivity {
     private TextView bleSupportValue;
     private TextView connectedDevices;
     private TextView advtStatus;
+    private TextView deviceName;
+    private TextView deviceSerialNo;
 
-    private Button button;
+    private Button rstButton;
+    private Button advtButton;
+    private Button stopAdvtButton;
 
     private byte[] manufacturerSpecificData;
 
@@ -95,6 +100,7 @@ public class MainActivity extends AppCompatActivity {
             super.onStartSuccess(settingsInEffect);
             advtStatus.setText(R.string.status_advertising);
             isAdvertising = true;
+            setDeviceValues();
             getData();
         }
 
@@ -142,6 +148,13 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    @SuppressLint("MissingPermission")
+    private void setDeviceValues() {
+        deviceName.setText(bluetoothAdapter.getName());
+        deviceSerialNo.setText(String.valueOf(prefs.getInt("glb_did", 0)));
+
+    }
+
     private final BluetoothGattServerCallback bluetoothGattServerCallback = new BluetoothGattServerCallback() {
         @Override
         public void onConnectionStateChange(BluetoothDevice device, int status, int newState) {
@@ -185,13 +198,28 @@ public class MainActivity extends AppCompatActivity {
 
             switch (characteristic.getUuid().toString()) {
                 case Characteristic.PC_CHARACTERISTIC_UUID:
-                    characteristic.setValue(isAuthorized ? airLinkData.getPcMap().EncodeToBytes() : nullValue);
+                    if(isAuthorized) {
+                        characteristic.setValue(airLinkData.getPcMap().EncodeToBytes());
+                        decrementThi();
+                    } else {
+                        characteristic.setValue(nullValue);
+                    }
                     break;
                 case Characteristic.BATT_CHARACTERISTIC_UUID:
-                    characteristic.setValue(isAuthorized ? airLinkData.getBattMap().EncodeToBytes() : nullValue);
+                    if(isAuthorized) {
+                        characteristic.setValue(airLinkData.getBattMap().EncodeToBytes());
+                        decrementThi();
+                    } else {
+                        characteristic.setValue(nullValue);
+                    }
                     break;
                 case Characteristic.TEMP_CHARACTERISTIC_UUID:
-                    characteristic.setValue(isAuthorized ? airLinkData.getTempMap().EncodeToBytes() : nullValue);
+                    if(isAuthorized) {
+                        characteristic.setValue(airLinkData.getTempMap().EncodeToBytes());
+                        decrementThi();
+                    } else {
+                        characteristic.setValue(nullValue);
+                    }
                     break;
                 case Characteristic.CCFG_CHARACTERISTIC_UUID:
                     characteristic.setValue(isAuthorized ? airLinkData.getCcfgMap().EncodeToBytes() : nullValue);
@@ -231,6 +259,9 @@ public class MainActivity extends AppCompatActivity {
                 Log.d("Error", err.toString());
             }
             int status = writeCharacteristic(characteristic, offset, value);
+            if(status == BluetoothGatt.GATT_SUCCESS) {
+                bluetoothGattServer.sendResponse(device, requestId, status, 0, null);
+            }
 
             if (responseNeeded) {
                 bluetoothGattServer.sendResponse(device, requestId, status, 0, null);
@@ -251,7 +282,6 @@ public class MainActivity extends AppCompatActivity {
             }
             bluetoothGattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, descriptor.getValue());
         }
-
 
         @Override
         public void onDescriptorWriteRequest(BluetoothDevice device, int requestId, BluetoothGattDescriptor descriptor, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
@@ -326,6 +356,16 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    private void decrementThi() {
+        //decrements the value of thi in shared prefs
+        int thi = prefs.getInt("glb_thi", 0);
+        int decrementedThi = 0;
+        if(thi > 0) {
+            decrementedThi = thi - 1;
+        }
+        prefs.edit().putInt("glb_thi", decrementedThi).apply();
+    }
+
     private void writeToCharacteristic(BluetoothGattCharacteristic characteristic, JSONObject jsonObject) {
 
         String descriptorName;
@@ -352,7 +392,7 @@ public class MainActivity extends AppCompatActivity {
                         runOnUiThread(() -> Toast.makeText(getApplicationContext(), "Device authorized", Toast.LENGTH_LONG).show());
                     } else {
                         //make toast on UI thread
-                        runOnUiThread(() -> Toast.makeText(getApplicationContext(), "Device failed to authorized", Toast.LENGTH_LONG).show());
+                        runOnUiThread(() -> Toast.makeText(getApplicationContext(), "Device failed to authorize", Toast.LENGTH_LONG).show());
                     }
                 }
 
@@ -374,7 +414,6 @@ public class MainActivity extends AppCompatActivity {
                 }
                 //provisioning
                 else if (descriptorName.equals("dcfg")) {
-                    Log.i(TAG, "Provisioning request");
                     if (!isAuthorized) {
                         //make toast on UI thread
                         runOnUiThread(() -> Toast.makeText(getApplicationContext(), "Device not authorized", Toast.LENGTH_LONG).show());
@@ -422,25 +461,24 @@ public class MainActivity extends AppCompatActivity {
         if (value.length != 1) {
             return BluetoothGatt.GATT_INVALID_ATTRIBUTE_LENGTH;
         }
+        //characteristic.setValue(value);
         return BluetoothGatt.GATT_SUCCESS;
     }
 
     public void notificationsEnabled(BluetoothGattCharacteristic characteristic, boolean indicate) {
         //todo: change this UUID to the one that has notifications enabled
-        if (characteristic.getUuid() != PC_CHARACTERISTIC_UUID) {
-            return;
-        }
-        if (indicate) {
-            Log.d(TAG, "Indications enabled");
-            runOnUiThread(() -> Toast.makeText(getApplicationContext(), "Indications enabled", Toast.LENGTH_LONG).show());
-        }
+        //if (characteristic.getUuid() != PC_CHARACTERISTIC_UUID) {
+        //    return;
+        //}
+        //if (indicate) {
+        //    Log.d(TAG, "Indications enabled");
+        //    runOnUiThread(() -> Toast.makeText(getApplicationContext(), "Indications enabled", Toast.LENGTH_LONG).show());
+        //}
     }
 
     public void notificationsDisabled(BluetoothGattCharacteristic characteristic) {
         //todo: change this UUID to the one that has notifications enabled
-        if (characteristic.getUuid() != PC_CHARACTERISTIC_UUID) {
-            return;
-        }
+
     }
 
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
@@ -454,8 +492,8 @@ public class MainActivity extends AppCompatActivity {
                 if (state == BluetoothAdapter.STATE_OFF) {
                     onStop();
                 } else if (state == BluetoothAdapter.STATE_ON) {
-                    //if bluetooth is on, check if advertising
-                    onStart();
+                    //if bluetooth is on, try to advertise again
+                    reAdvertise();
 
                 }
             }
@@ -518,8 +556,12 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         bleSupportValue = findViewById(R.id.bleSupportValueTextView);
         connectedDevices = findViewById(R.id.connectedDevicesTextView);
-        button = findViewById(R.id.button);
+        advtButton = findViewById(R.id.advBtn);
+        stopAdvtButton = findViewById(R.id.stopAdvBtn);
+        rstButton = findViewById(R.id.rstBtn);
         advtStatus = findViewById(R.id.advtStatusTextView);
+        deviceName = findViewById(R.id.deviceNameValueTextView);
+        deviceSerialNo = findViewById(R.id.deviceNumberValueTextView);
         Toolbar myToolbar = findViewById(R.id.toolbar);
         setSupportActionBar(myToolbar);
 
@@ -528,6 +570,7 @@ public class MainActivity extends AppCompatActivity {
         listener = (prefs, key) -> {
             System.out.println("Preferences changed: " + key);
             AirLinkData.setData(this, prefs);
+            setDeviceValues();
         };
 
         prefs.registerOnSharedPreferenceChangeListener(listener);
@@ -575,8 +618,16 @@ public class MainActivity extends AppCompatActivity {
             prefs.edit().putBoolean("firstTime", true).apply();
         }
 
-        button.setOnClickListener(v -> {
+        rstButton.setOnClickListener(v -> {
             setDefaultData();
+        });
+
+        advtButton.setOnClickListener(v -> {
+            reAdvertise();
+        });
+
+        stopAdvtButton.setOnClickListener(v -> {
+            onStop();
         });
 
     }
@@ -603,6 +654,15 @@ public class MainActivity extends AppCompatActivity {
         edit.putString("adv_pu", "m");
 
         edit.apply();
+
+        //add delay to allow data to be saved
+        try {
+            Thread.sleep(1000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        manufacturerSpecificData = new AirLinkData().getAdvertData().EncodeToBytes();
 
         System.out.println("Default data set: " + Helper.cborToString(manufacturerSpecificData));
 
@@ -661,51 +721,60 @@ public class MainActivity extends AppCompatActivity {
         resetStatusViews();
         // If the user disabled Bluetooth when the app was in the background,
         // openGattServer() will return null.
-        if(!isAdvertising) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                    ActivityCompat.requestPermissions(
-                            this,
-                            new String[]{Manifest.permission.BLUETOOTH_CONNECT},
-                            REQUEST_BLUETOOTH_CONNECT_PERMISSION);
-                }
-            }
-            bluetoothGattServer = bluetoothManager.openGattServer(this, bluetoothGattServerCallback);
 
-            if (bluetoothGattServer == null) {
-                Log.e(TAG, "Unable to create GATT server");
-                ensureBleFeaturesAvailable();
-                return;
-            }
-            Log.i(TAG, "Bluetooth GATT server opened");
-
-            //clear all services
-            bluetoothGattServer.clearServices();
-
-
-            //add the first service
-            bluetoothGattServer.addService(service.getDeviceDiscoveryGattService());
-
-            //add delay to wait for onServiceCallback
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-
-            //add another service
-            bluetoothGattServer.addService(service.getDeviceConfigService());
-
-            if (bluetoothAdapter.isMultipleAdvertisementSupported()) {
-                bleSupportValue.setText(R.string.supported);
-                bluetoothLeAdvertiser = bluetoothAdapter.getBluetoothLeAdvertiser();
-                bluetoothAdapter.setName("AIRLINK");
-                bluetoothLeAdvertiser.startAdvertising(settings, advertiseData, advertiseDataScanResponse, advertiseCallback);
-            } else {
-                bleSupportValue.setText(R.string.not_supported);
-                Log.e(TAG, "BLE advertising not supported");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(
+                        this,
+                        new String[]{Manifest.permission.BLUETOOTH_CONNECT},
+                        REQUEST_BLUETOOTH_CONNECT_PERMISSION);
             }
         }
+        bluetoothGattServer = bluetoothManager.openGattServer(this, bluetoothGattServerCallback);
+
+        if (bluetoothGattServer == null) {
+            Log.e(TAG, "Unable to create GATT server");
+            ensureBleFeaturesAvailable();
+            return;
+        }
+        Log.i(TAG, "Bluetooth GATT server opened");
+
+        bluetoothAdapter.setName(DEVICE_NAME);
+
+        //clear all services
+        bluetoothGattServer.clearServices();
+
+
+        //add the first service
+        bluetoothGattServer.addService(service.getDeviceDiscoveryGattService());
+
+        //add delay to wait for onServiceCallback
+        try {
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        //add another service
+        bluetoothGattServer.addService(service.getDeviceConfigService());
+
+        //generate random number btn 1000 and 9999
+        Random rand = new Random();
+        int thi = rand.nextInt(5) + 2;
+
+        //update PayG credit remaining (re)
+        prefs.edit().putInt("glb_thi", thi).apply();
+
+        if (bluetoothAdapter.isMultipleAdvertisementSupported()) {
+            bleSupportValue.setText(R.string.supported);
+            bluetoothLeAdvertiser = bluetoothAdapter.getBluetoothLeAdvertiser();
+            bluetoothLeAdvertiser.startAdvertising(settings, advertiseData, advertiseDataScanResponse, advertiseCallback);
+            Log.w(TAG, "Advertising started");
+        } else {
+            bleSupportValue.setText(R.string.not_supported);
+            Log.e(TAG, "BLE advertising not supported");
+        }
+
 
     }
 

@@ -24,5 +24,11 @@
     <string name="status_advFailed">Advertising failed</string>
     <string name="status_notAdvertising">Not advertising</string>
     <string name="status_advertising">Advertising</string>
+    <string name="reset">Reset</string>
+    <string name="reset_data">Reset Data</string>
+    <string name="readvertise">Readvertise</string>
+    <string name="stop_advertising">Stop advertising</string>
+    <string name="device_status">Device status</string>
+    <string name="device_details">Device details</string>
 
 </resources>

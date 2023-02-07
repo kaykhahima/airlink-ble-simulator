@@ -86,5 +86,6 @@ public class Descriptor {
         //initializing client descriptor for the `dfu` characteristic
         dfuClientDescriptor = new BluetoothGattDescriptor(CLIENT_CHARACTERISTIC_CONFIGURATION_UUID, BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE);
         dfuClientDescriptor.setValue(new byte[]{0, 0});
+
     }
 }
