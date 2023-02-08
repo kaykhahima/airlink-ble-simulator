@@ -63,7 +63,6 @@ public class MainActivity extends AppCompatActivity {
     private TextView advtStatus;
     private TextView deviceName;
     private TextView deviceSerialNo;
-
     private Button rstButton;
     private Button advtButton;
     private Button stopAdvtButton;
@@ -81,17 +80,11 @@ public class MainActivity extends AppCompatActivity {
     AdvertiseData advertiseData;
     AdvertiseData advertiseDataScanResponse;
     BluetoothLeAdvertiser bluetoothLeAdvertiser;
-
-    BluetoothGatt bluetoothGatt;
-
     BluetoothManager bluetoothManager;
     BluetoothAdapter bluetoothAdapter;
     Service service;
-
     Boolean isAdvertising = false;
-
     SharedPreferences prefs;
-
     SharedPreferences.OnSharedPreferenceChangeListener listener;
 
     private final AdvertiseCallback advertiseCallback = new AdvertiseCallback() {
@@ -107,7 +100,6 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onStartFailure(int errorCode) {
             super.onStartFailure(errorCode);
-            //advtStatus.setText(R.string.status_advFailed);
             switch (errorCode) {
                 case ADVERTISE_FAILED_ALREADY_STARTED:
                     isAdvertising = true;
@@ -147,13 +139,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
     };
-
-    @SuppressLint("MissingPermission")
-    private void setDeviceValues() {
-        deviceName.setText(bluetoothAdapter.getName());
-        deviceSerialNo.setText(String.valueOf(prefs.getInt("glb_did", 0)));
-
-    }
 
     private final BluetoothGattServerCallback bluetoothGattServerCallback = new BluetoothGattServerCallback() {
         @Override
@@ -198,7 +183,7 @@ public class MainActivity extends AppCompatActivity {
 
             switch (characteristic.getUuid().toString()) {
                 case Characteristic.PC_CHARACTERISTIC_UUID:
-                    if(isAuthorized) {
+                    if (isAuthorized) {
                         characteristic.setValue(airLinkData.getPcMap().EncodeToBytes());
                         decrementThi();
                     } else {
@@ -206,7 +191,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                     break;
                 case Characteristic.BATT_CHARACTERISTIC_UUID:
-                    if(isAuthorized) {
+                    if (isAuthorized) {
                         characteristic.setValue(airLinkData.getBattMap().EncodeToBytes());
                         decrementThi();
                     } else {
@@ -214,7 +199,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                     break;
                 case Characteristic.TEMP_CHARACTERISTIC_UUID:
-                    if(isAuthorized) {
+                    if (isAuthorized) {
                         characteristic.setValue(airLinkData.getTempMap().EncodeToBytes());
                         decrementThi();
                     } else {
@@ -259,7 +244,7 @@ public class MainActivity extends AppCompatActivity {
                 Log.d("Error", err.toString());
             }
             int status = writeCharacteristic(characteristic, offset, value);
-            if(status == BluetoothGatt.GATT_SUCCESS) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
                 bluetoothGattServer.sendResponse(device, requestId, status, 0, null);
             }
 
@@ -356,15 +341,24 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
-    private void decrementThi() {
-        //decrements the value of thi in shared prefs
-        int thi = prefs.getInt("glb_thi", 0);
-        int decrementedThi = 0;
-        if(thi > 0) {
-            decrementedThi = thi - 1;
+    private final BroadcastReceiver receiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            final String action = intent.getAction();
+
+            if (action.equals(BluetoothAdapter.ACTION_STATE_CHANGED)) {
+                final int state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE,
+                        BluetoothAdapter.ERROR);
+                if (state == BluetoothAdapter.STATE_OFF) {
+                    onStop();
+                } else if (state == BluetoothAdapter.STATE_ON) {
+                    //if bluetooth is on, try to advertise again
+                    reAdvertise();
+
+                }
+            }
         }
-        prefs.edit().putInt("glb_thi", decrementedThi).apply();
-    }
+    };
 
     private void writeToCharacteristic(BluetoothGattCharacteristic characteristic, JSONObject jsonObject) {
 
@@ -480,26 +474,6 @@ public class MainActivity extends AppCompatActivity {
         //todo: change this UUID to the one that has notifications enabled
 
     }
-
-    private final BroadcastReceiver receiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            final String action = intent.getAction();
-
-            if (action.equals(BluetoothAdapter.ACTION_STATE_CHANGED)) {
-                final int state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE,
-                        BluetoothAdapter.ERROR);
-                if (state == BluetoothAdapter.STATE_OFF) {
-                    onStop();
-                } else if (state == BluetoothAdapter.STATE_ON) {
-                    //if bluetooth is on, try to advertise again
-                    reAdvertise();
-
-                }
-            }
-        }
-    };
-
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
@@ -632,6 +606,131 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
+    @Override
+    protected void onStart() {
+        super.onStart();
+        resetStatusViews();
+        // If the user disabled Bluetooth when the app was in the background,
+        // openGattServer() will return null.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(
+                        this,
+                        new String[]{Manifest.permission.BLUETOOTH_CONNECT},
+                        REQUEST_BLUETOOTH_CONNECT_PERMISSION);
+            }
+        }
+        bluetoothGattServer = bluetoothManager.openGattServer(this, bluetoothGattServerCallback);
+
+        if (bluetoothGattServer == null) {
+            Log.e(TAG, "Unable to create GATT server");
+            ensureBleFeaturesAvailable();
+            return;
+        }
+        Log.i(TAG, "Bluetooth GATT server opened");
+
+        //clear all services
+        bluetoothGattServer.clearServices();
+
+        //add the first service
+        bluetoothGattServer.addService(service.getDeviceDiscoveryGattService());
+
+        //add delay to wait for onServiceCallback
+        try {
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        //add another service
+        bluetoothGattServer.addService(service.getDeviceConfigService());
+
+        //generate random number btn 1000 and 9999
+        Random rand = new Random();
+        int thi = rand.nextInt(5) + 2;
+
+        //update PayG credit remaining (re)
+        prefs.edit().putInt("glb_thi", thi).apply();
+
+        if (bluetoothAdapter.isMultipleAdvertisementSupported()) {
+            bleSupportValue.setText(R.string.supported);
+
+            if(!bluetoothAdapter.isEnabled()) {
+                ensureBleFeaturesAvailable();
+            }
+            bluetoothAdapter.setName(DEVICE_NAME);
+            deviceName.setText(bluetoothAdapter.getName());
+            bluetoothLeAdvertiser = bluetoothAdapter.getBluetoothLeAdvertiser();
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) != PackageManager.PERMISSION_GRANTED) {
+                    ActivityCompat.requestPermissions(
+                            this,
+                            new String[]{Manifest.permission.BLUETOOTH_ADVERTISE},
+                            REQUEST_BLUETOOTH_ADVERTISE_PERMISSION);
+                }
+            }
+            bluetoothLeAdvertiser.startAdvertising(settings, advertiseData, advertiseDataScanResponse, advertiseCallback);
+            Log.i(TAG, "Advertising started");
+        } else {
+            bleSupportValue.setText(R.string.not_supported);
+            Log.e(TAG, "BLE advertising not supported");
+        }
+
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        Log.d(TAG, "onStop");
+        if (bluetoothGattServer != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) != PackageManager.PERMISSION_GRANTED) {
+                    ActivityCompat.requestPermissions(
+                            this,
+                            new String[]{Manifest.permission.BLUETOOTH_ADVERTISE},
+                            REQUEST_BLUETOOTH_ADVERTISE_PERMISSION);
+                }
+            }
+            bluetoothGattServer.close();
+        }
+
+        bluetoothGattServer = null;
+
+        if (bluetoothLeAdvertiser != null) {
+            bluetoothLeAdvertiser.stopAdvertising(advertiseCallback);
+        }
+        resetStatusViews();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // Unregister broadcast listeners
+        unregisterReceiver(receiver);
+    }
+
+    private void ensureBleFeaturesAvailable() {
+        Log.i(TAG, "ensureBleFeaturesAvailable called");
+        if (bluetoothAdapter == null) {
+            Toast.makeText(this, "Bluetooth not supported", Toast.LENGTH_LONG).show();
+            Log.e(TAG, "Bluetooth not supported");
+            finish();
+        } else if (!bluetoothAdapter.isEnabled()) {
+            // Make sure bluetooth is enabled.
+            Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                    ActivityCompat.requestPermissions(
+                            this,
+                            new String[]{Manifest.permission.BLUETOOTH_CONNECT},
+                            REQUEST_BLUETOOTH_CONNECT_PERMISSION);
+                }
+            }
+            startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
+        }
+    }
+
     private void setDefaultData() {
         onStop();
         SharedPreferences.Editor edit = prefs.edit();
@@ -669,7 +768,6 @@ public class MainActivity extends AppCompatActivity {
         onStart();
 
     }
-
 
     public void reAdvertise() {
         onStop();
@@ -715,88 +813,19 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
-    @Override
-    protected void onStart() {
-        super.onStart();
-        resetStatusViews();
-        // If the user disabled Bluetooth when the app was in the background,
-        // openGattServer() will return null.
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(
-                        this,
-                        new String[]{Manifest.permission.BLUETOOTH_CONNECT},
-                        REQUEST_BLUETOOTH_CONNECT_PERMISSION);
-            }
-        }
-        bluetoothGattServer = bluetoothManager.openGattServer(this, bluetoothGattServerCallback);
-
-        if (bluetoothGattServer == null) {
-            Log.e(TAG, "Unable to create GATT server");
-            ensureBleFeaturesAvailable();
-            return;
-        }
-        Log.i(TAG, "Bluetooth GATT server opened");
-
-        bluetoothAdapter.setName(DEVICE_NAME);
-
-        //clear all services
-        bluetoothGattServer.clearServices();
-
-
-        //add the first service
-        bluetoothGattServer.addService(service.getDeviceDiscoveryGattService());
-
-        //add delay to wait for onServiceCallback
-        try {
-            Thread.sleep(500);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-
-        //add another service
-        bluetoothGattServer.addService(service.getDeviceConfigService());
-
-        //generate random number btn 1000 and 9999
-        Random rand = new Random();
-        int thi = rand.nextInt(5) + 2;
-
-        //update PayG credit remaining (re)
-        prefs.edit().putInt("glb_thi", thi).apply();
-
-        if (bluetoothAdapter.isMultipleAdvertisementSupported()) {
-            bleSupportValue.setText(R.string.supported);
-            bluetoothLeAdvertiser = bluetoothAdapter.getBluetoothLeAdvertiser();
-            bluetoothLeAdvertiser.startAdvertising(settings, advertiseData, advertiseDataScanResponse, advertiseCallback);
-            Log.w(TAG, "Advertising started");
-        } else {
-            bleSupportValue.setText(R.string.not_supported);
-            Log.e(TAG, "BLE advertising not supported");
-        }
-
+    private void setDeviceValues() {
+        deviceSerialNo.setText(String.valueOf(prefs.getInt("glb_did", 0)));
 
     }
 
-    private void ensureBleFeaturesAvailable() {
-        Log.i(TAG, "ensureBleFeaturesAvailable called");
-        if (bluetoothAdapter == null) {
-            Toast.makeText(this, "Bluetooth not supported", Toast.LENGTH_LONG).show();
-            Log.e(TAG, "Bluetooth not supported");
-            finish();
-        } else if (!bluetoothAdapter.isEnabled()) {
-            // Make sure bluetooth is enabled.
-            Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                    ActivityCompat.requestPermissions(
-                            this,
-                            new String[]{Manifest.permission.BLUETOOTH_CONNECT},
-                            REQUEST_BLUETOOTH_CONNECT_PERMISSION);
-                }
-            }
-            startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
+    private void decrementThi() {
+        //decrements the value of thi in shared prefs
+        int thi = prefs.getInt("glb_thi", 0);
+        int decrementedThi = 0;
+        if (thi > 0) {
+            decrementedThi = thi - 1;
         }
+        prefs.edit().putInt("glb_thi", decrementedThi).apply();
     }
 
     private void disconnectFromDevices() {
@@ -824,32 +853,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    @Override
-    protected void onStop() {
-        super.onStop();
-        Log.d(TAG, "onStop");
-        if (bluetoothGattServer != null) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                    ActivityCompat.requestPermissions(
-                            this,
-                            new String[]{Manifest.permission.BLUETOOTH_CONNECT},
-                            REQUEST_BLUETOOTH_CONNECT_PERMISSION);
-                }
-            }
-            bluetoothGattServer.close();
-        }
-        if (bluetoothAdapter.isEnabled() && bluetoothLeAdvertiser != null) {
-            bluetoothLeAdvertiser.stopAdvertising(advertiseCallback);
-        }
-        resetStatusViews();
-    }
 
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        // Unregister broadcast listeners
-        unregisterReceiver(receiver);
-    }
 
 }
